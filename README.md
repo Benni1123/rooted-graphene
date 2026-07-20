@@ -367,6 +367,15 @@ Also, some parts of kernelsu seem to be closed source, which feels suspicious an
 Another alternative might be to use a version of magisk (like [the one maintained by pixincreate](https://github.com/pixincreate/Magisk)) that contains patches to make zygisk work.  
 This still has some limitations, like [certain modules checking for magisk's signature won't work](https://github.com/schnatterer/rooted-graphene/commit/da0cd817c2665798df46df1aeb7caef9d98b79d0#r141746606).
 
+This variant can be built as an additional `magisk-pixin` flavor, next to the regular `magisk` and `rootless` ones.  
+It is disabled by default, so it is never silently forced on existing users. Enable it by setting `SKIP_MAGISK_PIXIN=false`
+(or the `skip-magisk-pixin` input in `release-single.yaml`). It requires `MAGISK_PREINIT_DEVICE` to be set, just like the regular magisk flavor,
+and it reuses `MAGISK_VERSION`, since the fork uses the same tags as upstream magisk.
+
+The resulting OTAs are published as a separate flavor, so in Custota you would point to the `magisk-pixin` path of your OTA server, e.g.
+`https://rooted-graphene.github.io/ota/magisk-pixin`. As with the other flavors, you can switch between them via OTA updates.
+
+> ⚠️ By using this flavor you also have to trust the authors of that fork, in addition to everyone listed above.
 Another option [might be](https://github.com/schnatterer/rooted-graphene/pull/73#issuecomment-2666870886) Kitsune magisk.
 
 In general, using [magisk and especially zygisk with Graphene seems to have the risk of breaking things with every new release](https://github.com/chenxiaolong/avbroot/issues/213#issuecomment-1986637884).  
