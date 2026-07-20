@@ -28,6 +28,12 @@ GITHUB_REPO=${GITHUB_REPO:-''}
 MAGISK_PREINIT_DEVICE=${MAGISK_PREINIT_DEVICE:-}
 # Skip creation of rootless OTA by setting to "true"
 SKIP_ROOTLESS=${SKIP_ROOTLESS:-'false'}
+# In addition to upstream magisk, an OTA can be patched with pixincreate's magisk fork,
+# which contains patches that make zygisk work on GrapheneOS.
+# https://github.com/pixincreate/Magisk
+# Note that modules verifying magisk's signature won't work with this fork.
+# Enable by setting to "false".
+SKIP_MAGISK_PIXIN=${SKIP_MAGISK_PIXIN:-'true'}
 # https://grapheneos.org/releases#stable-channel
 OTA_VERSION=${OTA_VERSION:-'latest'}
 
@@ -38,14 +44,6 @@ OTA_VERSION=${OTA_VERSION:-'latest'}
 # renovate: datasource=github-releases packageName=topjohnwu/Magisk versioning=semver-coerced
 DEFAULT_MAGISK_VERSION=v30.7
 MAGISK_VERSION=${MAGISK_VERSION:-${DEFAULT_MAGISK_VERSION}}
-
-# Additional flavor built with the pixincreate Magisk fork (zygisk patches for GrapheneOS)
-# https://github.com/pixincreate/Magisk
-# Enable by setting MAGISK_PIXIN=true (requires MAGISK_PREINIT_DEVICE to be set as well)
-MAGISK_PIXIN=${MAGISK_PIXIN:-'false'}
-# renovate: datasource=github-releases packageName=pixincreate/Magisk versioning=semver-coerced
-DEFAULT_MAGISK_PIXIN_VERSION=v30.7
-MAGISK_PIXIN_VERSION=${MAGISK_PIXIN_VERSION:-${DEFAULT_MAGISK_PIXIN_VERSION}}
 
 SKIP_CLEANUP=${SKIP_CLEANUP:-''}
 
@@ -75,7 +73,7 @@ NO_COLOR=${NO_COLOR:-''}
 OTA_BASE_URL="https://releases.grapheneos.org"
 
 # renovate: datasource=github-releases packageName=chenxiaolong/avbroot versioning=semver
-AVB_ROOT_VERSION=3.31.0
+AVB_ROOT_VERSION=3.32.0
 # renovate: datasource=github-releases packageName=chenxiaolong/Custota versioning=semver-coerced
 CUSTOTA_VERSION=6.2
 # renovate: datasource=git-refs packageName=https://github.com/chenxiaolong/my-avbroot-setup currentValue=master
@@ -152,15 +150,15 @@ function checkBuildNecessary() {
   if [[ -n "$MAGISK_PREINIT_DEVICE" ]]; then 
     # e.g. oriole-2023121200-magisk-v26.4-4647f74-dirty.zip
     POTENTIAL_ASSETS['magisk']="${DEVICE_ID}-${OTA_VERSION}-${currentCommit}-magisk-${MAGISK_VERSION}$(createAssetSuffix).zip"
+
+    if [[ "$SKIP_MAGISK_PIXIN" != 'true' ]]; then
+      # e.g. oriole-2023121200-magisk-pixin-v30.7-4647f74-dirty.zip
+      POTENTIAL_ASSETS['magisk-pixin']="${DEVICE_ID}-${OTA_VERSION}-${currentCommit}-magisk-pixin-${MAGISK_VERSION}$(createAssetSuffix).zip"
+    else
+      printGreen "SKIP_MAGISK_PIXIN set, not creating magisk-pixin OTA"
+    fi
   else 
     printGreen "MAGISK_PREINIT_DEVICE not set for device, not creating magisk OTA"
-  fi
-
-  if [[ "$MAGISK_PIXIN" == 'true' ]] && [[ -n "$MAGISK_PREINIT_DEVICE" ]]; then
-    # e.g. oriole-2023121200-magisk-pixin-v30.7-4647f74-dirty.zip
-    POTENTIAL_ASSETS['magisk-pixin']="${DEVICE_ID}-${OTA_VERSION}-${currentCommit}-magisk-pixin-${MAGISK_PIXIN_VERSION}$(createAssetSuffix).zip"
-  elif [[ "$MAGISK_PIXIN" == 'true' ]]; then
-    printGreen "MAGISK_PREINIT_DEVICE not set for device, not creating magisk-pixin OTA"
   fi
   
   if [[ "$SKIP_ROOTLESS" != 'true' ]]; then
@@ -201,7 +199,8 @@ function checkBuildNecessary() {
       selectedAsset=$(echo "${response}" | jq -r --arg assetPrefix "${DEVICE_ID}-${OTA_VERSION}" \
         '.assets[] | select(.name | startswith($assetPrefix)) | .name' \
           | grep "${flavor}" || true)
-      # "magisk" is a substring of "magisk-pixin", so exclude pixin assets when checking the plain magisk flavor
+      # "magisk" is a substring of "magisk-pixin". Without this, an existing magisk-pixin asset
+      # would make the plain magisk flavor be skipped.
       if [[ "$flavor" == 'magisk' ]]; then
         selectedAsset=$(echo "${selectedAsset}" | grep -v 'magisk-pixin' || true)
       fi
@@ -257,9 +256,9 @@ function downloadAndroidDependencies() {
     curl --fail -sLo ".tmp/magisk-$MAGISK_VERSION.apk" "https://github.com/topjohnwu/Magisk/releases/download/$MAGISK_VERSION/Magisk-$MAGISK_VERSION.apk"
   fi
 
-  # pixincreate fork names its release asset "app-release.apk"
-  if ! ls ".tmp/magisk-pixin-$MAGISK_PIXIN_VERSION.apk" >/dev/null 2>&1 && [[ "${POTENTIAL_ASSETS['magisk-pixin']+isset}" ]]; then
-    curl --fail -sLo ".tmp/magisk-pixin-$MAGISK_PIXIN_VERSION.apk" "https://github.com/pixincreate/Magisk/releases/download/$MAGISK_PIXIN_VERSION/app-release.apk"
+  # pixincreate's fork releases its APK as "app-release.apk" and uses the same tags as upstream magisk
+  if ! ls ".tmp/magisk-pixin-$MAGISK_VERSION.apk" >/dev/null 2>&1 && [[ "${POTENTIAL_ASSETS['magisk-pixin']+isset}" ]]; then
+    curl --fail -sLo ".tmp/magisk-pixin-$MAGISK_VERSION.apk" "https://github.com/pixincreate/Magisk/releases/download/$MAGISK_VERSION/app-release.apk"
   fi
 
   if ! ls ".tmp/$OTA_TARGET.zip" >/dev/null 2>&1; then
@@ -272,13 +271,6 @@ function findLatestVersion() {
 
   if [[ "$MAGISK_VERSION" == 'latest' ]]; then
     MAGISK_VERSION=$(curl --fail -sL -I -o /dev/null -w '%{url_effective}' https://github.com/topjohnwu/Magisk/releases/latest | sed 's/.*\/tag\///;')
-  fi
-
-  if [[ "$MAGISK_PIXIN_VERSION" == 'latest' ]]; then
-    MAGISK_PIXIN_VERSION=$(curl --fail -sL -I -o /dev/null -w '%{url_effective}' https://github.com/pixincreate/Magisk/releases/latest | sed 's/.*\/tag\///;')
-  fi
-  if [[ "$MAGISK_PIXIN" == 'true' ]]; then
-    print "Magisk (pixincreate fork) version: $MAGISK_PIXIN_VERSION"
   fi
   print "Magisk version: $MAGISK_VERSION"
 
@@ -361,7 +353,7 @@ function patchOTAs() {
         args+=("--patch-arg=--magisk-preinit-device" "--patch-arg" "$MAGISK_PREINIT_DEVICE")
       fi
       if [[ "$flavor" == 'magisk-pixin' ]]; then
-        args+=("--patch-arg=--magisk" "--patch-arg" ".tmp/magisk-pixin-$MAGISK_PIXIN_VERSION.apk")
+        args+=("--patch-arg=--magisk" "--patch-arg" ".tmp/magisk-pixin-$MAGISK_VERSION.apk")
         args+=("--patch-arg=--magisk-preinit-device" "--patch-arg" "$MAGISK_PREINIT_DEVICE")
       fi
 
